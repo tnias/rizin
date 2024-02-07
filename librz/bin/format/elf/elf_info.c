@@ -747,6 +747,10 @@ static bool arch_is_sparc(ELFOBJ *bin) {
 		bin->ehdr.e_machine == EM_SPARCV9;
 }
 
+static bool arch_is_arm(ELFOBJ *bin) {
+	return bin->ehdr.e_machine == EM_ARM;
+}
+
 static bool arch_is_arcompact(ELFOBJ *bin) {
 	return bin->ehdr.e_machine == EM_ARC_A5 ||
 		bin->ehdr.e_machine == EM_ARC_COMPACT3_64 ||
@@ -989,6 +993,56 @@ static char *get_cpu_mips(ELFOBJ *bin) {
 	}
 
 	return rz_strbuf_drain_nofree(&sb);
+}
+
+static char *read_arm_attributes_section(char *ptr, ut32 bytes_to_read, bool isbig) {
+	/* TODO */
+	return strdup(" Unknown arm ISA");
+}
+
+/**
+ * Processor-specific section types explained in:
+ * 1. https://github.com/ARM-software/abi-aa/blob/main/aaelf32/aaelf32.rst
+ * 2. https://github.com/ARM-software/abi-aa/blob/main/addenda32/addenda32.rst
+ */
+static char *get_cpu_arm(ELFOBJ *bin) {
+	RzBinElfSection *section = Elf_(rz_bin_elf_get_section_with_name)(bin, ".ARM.attributes");
+	if (!section) {
+		return strdup(" Unknown arm ISA");
+	}
+
+	ut64 offset = section->offset;
+	ut64 size = section->size;
+	if (size < 1) {
+		return strdup(" Unknown arm ISA");
+	}
+
+	char *result = malloc(size + 1);
+	if (!result) {
+		return strdup(" Unknown arm ISA");
+	}
+
+	if (rz_buf_read_at(bin->b, offset, (ut8 *)result, size) < 1) {
+		free(result);
+		return strdup(" Unknown arm ISA");
+	}
+
+	char *subsection_ptr = result + 1; // Point to the first subsection (first byte is the format-version)
+	bool isbig = Elf_(rz_bin_elf_is_big_endian)(bin);
+
+	while (subsection_ptr - result < size) {
+		char *ptr = subsection_ptr;
+		ut32 subsection_size = rz_read_ble32(ptr, isbig);
+		ptr += 4;
+
+		if (!strcmp(ptr, "aeabi")) {
+			ptr += strlen("aeabi") + 1; // +1 for the null byte
+			return read_arm_attributes_section(ptr, subsection_size - 10, isbig);
+		}
+		subsection_ptr += subsection_size;
+	}
+
+	return strdup(" Unknown arm ISA");
 }
 
 static char *get_abi_mips(ELFOBJ *bin) {
@@ -1631,7 +1685,7 @@ RZ_OWN char *Elf_(rz_bin_elf_get_arch)(RZ_NONNULL ELFOBJ *bin) {
  * \param elf type
  * \return allocated string
  *
- * Only work on mips right now. Use the elf header to deduce the cpu
+ * Only work on mips and arm right now. Use the elf header to deduce the cpu
  */
 RZ_OWN char *Elf_(rz_bin_elf_get_cpu)(RZ_NONNULL ELFOBJ *bin) {
 	rz_return_val_if_fail(bin, NULL);
@@ -1646,6 +1700,8 @@ RZ_OWN char *Elf_(rz_bin_elf_get_cpu)(RZ_NONNULL ELFOBJ *bin) {
 		// Capstone has only v8 and v9 for now.
 		// So no finer distinction necessary.
 		return bin->ehdr.e_machine == EM_SPARC ? strdup("v8") : strdup("v9");
+	} else if (arch_is_arm(bin)) {
+		return get_cpu_arm(bin);
 	}
 
 	return NULL;
