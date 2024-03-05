@@ -997,14 +997,84 @@ static char *get_cpu_mips(ELFOBJ *bin) {
 
 static char *read_arm_build_attributes(char *ptr, ut32 bytes_to_read, bool isbig) {
 	while (bytes_to_read > 0) {
-		/* TODO: Search for TAG_CPU_ARCH and Tag_CPU_ARCH_PROFILE */
+		ut64 arm_tag = 0;
+		int len = 0;
+		rz_uleb128_decode((ut8 *)ptr, &len, &arm_tag);
+		ptr += len;
+		bytes_to_read -= len;
+		arm_tag = arm_tag % 128;
+		switch (arm_tag) {
+		case TAG_CPU_ARCH: {
+			ut64 cpu_arch = 0;
+			rz_uleb128_decode((ut8 *)ptr, &len, &cpu_arch);
+			ptr += len;
+			bytes_to_read -= len;
+			switch (cpu_arch) {
+			case ARM_VER_V8_A:
+			case ARM_VER_V8_1_A:
+			case ARM_VER_V8_2_A:
+			case ARM_VER_V8_3_A:
+			case ARM_VER_V9_A:
+				break;
+			}
+		}
+		case TAG_CPU_ARCH_PROFILE:
+			return strdup("Tag_CPU_ARCH_PROFILE");
+		case TAG_CPU_RAW_NAME:
+		case TAG_CPU_NAME:
+		case TAG_COMPATIBILITY:
+			len = strlen(ptr) + 1;
+			bytes_to_read -= len;
+			ptr += len;
+			break;
+		case TAG_ARM_ISA_USE:
+		case TAG_THUMB_ISA_USE:
+		case TAG_FP_ARCH:
+		case TAG_WMMX_ARCH:
+		case TAG_ADVANCED_SIMD_ARCH:
+		case TAG_PCS_CONFIG:
+		case TAG_ABI_PCS_R9_USE:
+		case TAG_ABI_PCS_RW_DATA:
+		case TAG_ABI_PCS_RO_DATA:
+		case TAG_ABI_PCS_GOT_USE:
+		case TAG_ABI_PCS_WCHAR_T:
+		case TAG_ABI_ENUM_SIZE:
+		case TAG_ABI_ALIGN_NEEDED:
+		case TAG_ABI_ALIGN_PRESERVED:
+		case TAG_ABI_FP_ROUNDING:
+		case TAG_ABI_FP_DENORMAL:
+		case TAG_ABI_FP_EXCEPTIONS:
+		case TAG_ABI_FP_USER_EXCEPTIONS:
+		case TAG_ABI_FP_NUMBER_MODEL:
+		case TAG_ABI_HARDFP_USE:
+		case TAG_ABI_VFP_ARGS:
+		case TAG_ABI_WMMX_ARGS:
+		case TAG_ABI_OPTIMIZATION_GOALS:
+		case TAG_ABI_FP_OPTIMIZATION_GOALS:
+			rz_uleb128_decode((ut8 *)ptr, &len, NULL);
+			ptr += len;
+			bytes_to_read -= len;
+			break;
+		default:
+			if (arm_tag > 32) {
+				if (arm_tag & 1) {
+					len = strlen(ptr) + 1;
+					bytes_to_read -= len;
+					ptr += len;
+				} else {
+					rz_uleb128_decode((ut8 *)ptr, &len, NULL);
+					ptr += len;
+					bytes_to_read -= len;
+				}
+			}
+		}
 	}
 	return strdup(" Unknown arm ISA");
 }
 
 static char *read_arm_aeabi_section(char *ptr, ut32 bytes_to_read, bool isbig) {
 	while (bytes_to_read > 0) {
-		ut8 sub_subsection = *ptr;
+		ut8 sub_subsection = rz_read_ble8(ptr); // Will always be 1, 2 or 3, hence no need for uleb128 decoding.
 		ut32 sub_subsection_size = rz_read_ble32(ptr + 1, isbig);
 
 		if (sub_subsection == ARM_TAG_FILE) {
